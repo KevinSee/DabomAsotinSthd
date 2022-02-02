@@ -121,17 +121,9 @@ ggplot() +
                         end = 0.8) +
   scale_size_continuous(range = c(0.2, 1.2),
                         guide = 'none') +
-  # geom_sf(data = nhd_list$basin,
-  #         fill = NA,
-  #         lwd = 2) +
-  # # this cuts out parts of the basin upstream of upstrm_loc
-  # geom_sf(data = flowlines %>%
-  #           filter(!Hydroseq %in% nhd_list$dwn_flowlines$Hydroseq) %>%
-  #           summarise(bndry = 'basin') %>%
-  #           select(bndry) %>%
-  #           st_convex_hull(),
-  #         fill = NA,
-  #         lwd = 2) +
+  geom_sf(data = nhd_list$basin,
+          fill = NA,
+          lwd = 2) +
   geom_sf(data = sites_sf,
           size = 4,
           color = "black") +
