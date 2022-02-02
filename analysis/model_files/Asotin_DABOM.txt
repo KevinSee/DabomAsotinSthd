@@ -7,8 +7,9 @@ model {
 	 ACBA0_p ~ dbeta(1, 1);
 	 CCAB0_p ~ dbeta(1, 1);
 	 CCAA0_p ~ dbeta(1, 1);
-	 AFCB0_p ~ dbeta(1, 1);
-	 AFCA0_p ~ dbeta(1, 1);
+	 AFCMB0_p ~ dbeta(1, 1);
+	 AFCSB0_p ~ dbeta(1, 1);
+	 AFCNB0_p ~ dbeta(1, 1);
 
 # Priors for transition probabilities 
 
@@ -36,6 +37,18 @@ model {
 	 omega_ACB[3, 1:n_branch_ACB] <- psi_ACB[2,]; 
 	 omega_ACB[3, (n_branch_ACB + 1)] <- 0; 
 
+	 psi_AFCM[1, 1:n_branch_AFCM] ~ ddirch(AFCM_dirch_vec[1,]); 
+	 psi_AFCM[2, 1:n_branch_AFCM] ~ ddirch(AFCM_dirch_vec[2,]); 
+
+	 omega_AFCM[1, 1:n_branch_AFCM] <- zero_vec[1:(n_branch_AFCM)]; 
+	 omega_AFCM[1, (n_branch_AFCM + 1)] <- 1; 
+
+	 omega_AFCM[2, 1:n_branch_AFCM] <- psi_AFCM[1,]; 
+	 omega_AFCM[2, (n_branch_AFCM + 1)] <- 0; 
+
+	 omega_AFCM[3, 1:n_branch_AFCM] <- psi_AFCM[2,]; 
+	 omega_AFCM[3, (n_branch_AFCM + 1)] <- 0; 
+
 # Where is each fish? 
 
 	 for(i in 1:n_fish) { 
@@ -49,6 +62,11 @@ model {
 		 a_ACB[i] ~ dcat( omega_ACB[(eta_ASOTIC[i,1] * fish_type[i] + 1), 1:(n_branch_ACB+1)] ) 
 			 for (j in 1:n_branch_ACB)	{ 
 				 eta_ACB[i,j] <- equals(a_ACB[i],j) # equals(x,y) is a test for equality, returns [1,0] 
+			 }
+
+		 a_AFCM[i] ~ dcat( omega_AFCM[(eta_ACB[i,2] * fish_type[i] + 1), 1:(n_branch_AFCM+1)] ) 
+			 for (j in 1:n_branch_AFCM)	{ 
+				 eta_AFCM[i,j] <- equals(a_AFCM[i],j) # equals(x,y) is a test for equality, returns [1,0] 
 			 }
 
 	} # end the n_fish loop 
@@ -68,9 +86,11 @@ model {
 
 		 cap_hist[i,5] ~ dbern( CCAA0_p * eta_ACB[i,1] );
 
-		 cap_hist[i,6] ~ dbern( AFCB0_p * eta_ACB[i,2] );
+		 cap_hist[i,6] ~ dbern( AFCMB0_p * eta_ACB[i,2] );
 
-		 cap_hist[i,7] ~ dbern( AFCA0_p * eta_ACB[i,2] );
+		 cap_hist[i,7] ~ dbern( AFCSB0_p * eta_AFCM[i,2] );
+
+		 cap_hist[i,8] ~ dbern( AFCNB0_p * eta_AFCM[i,1] );
 
 	}  # end the n_fish loop 
 }
