@@ -9,6 +9,17 @@ institute:
   - wdfw: Washington Department of Fish & Wildlife
 date: "`r format(Sys.time(), '%d %B, %Y')`"
 output: 
+    bookdown::pdf_document2:
+      fig_caption: yes
+      fig_height: 5
+      fig_width: 6
+      toc: yes
+      includes:
+        in_header: ../templates/header_WDFW.tex
+      pandoc_args:
+      - --lua-filter=../templates/scholarly-metadata.lua
+      - --lua-filter=../templates/author-info-blocks2.lua
+      - --lua-filter=../templates/pagebreak.lua
     wdfwTemplates::wdfw_html_format2:
       fig_caption: yes
       fig_height: 5
@@ -21,17 +32,6 @@ output:
       pandoc_args:
       - --lua-filter=../templates/scholarly-metadata.lua
       - --lua-filter=../templates/author-info-blocks.lua
-      - --lua-filter=../templates/pagebreak.lua
-    bookdown::pdf_document2:
-      fig_caption: yes
-      fig_height: 5
-      fig_width: 6
-      toc: yes
-      includes:
-        in_header: ../templates/header_WDFW.tex
-      pandoc_args:
-      - --lua-filter=../templates/scholarly-metadata.lua
-      - --lua-filter=../templates/author-info-blocks2.lua
       - --lua-filter=../templates/pagebreak.lua
     bookdown::html_document2:
       fig_caption: yes
@@ -59,6 +59,28 @@ output:
       - --lua-filter=../templates/pagebreak.lua
 bibliography:
 - ../paper/references.bib
+references:
+- id: Waterhouse2020
+  title: A Bayesian nested patch occupancy model to estimate steelhead movement and abundance
+  author:
+  - family: Waterhouse
+    given: Lynn
+  - family: White
+    given: Jody
+  - family: See 
+    given: Kevin
+  - family: Murdoch
+    given: Andrew
+  container-title: Ecological Applications
+  volume: 30
+  URL: 'https://doi.org/10.1002/eap.2202'
+  DOI: 10.1002/eap.2202
+  issue: 8
+  publisher: Ecological Society of America
+  type: article-journal
+  issued:
+    year: 2020
+    month: 12
 csl: "../templates/american-fisheries-society.csl" # Insert path for the bib-style
 abstract: |
   This manual contains instructions on how to run the DABOM model to estimate adult abundace for steelhead to locations in the Asotin River basin. We start by describing how to query for detections of a selected list of PIT tags using PTAGIS. We then "clean up" the detections using the R package PITcleanr. Finally we describe how to write the JAGS model for use in DABOM, and finally, run DABOM to estimate transition probabilities for steelhead throughout the Asotin system. DABOM movement probabilities can then be multiplied by estimates of escapement at the Asotin weir to get abundance to locations or tributaries.
@@ -68,7 +90,7 @@ highlights: |
   These are the highlights.
 ---
 
-```{r setup, echo = FALSE}
+```{r setup, echo = FALSE, warning=F, message=F}
 # setwd('analysis/paper')
 library(knitr)
 knitr::opts_chunk$set(
@@ -80,6 +102,7 @@ knitr::opts_chunk$set(
 )
 
 library(kableExtra)
+library(here)
 ```
 
 # Introduction
@@ -167,40 +190,19 @@ library(readxl)
 yr = 2021
 ```
 
-```{r, eval = F}
-# read in biological data from weir
-bio_df = read_excel('../data/raw_data/WDFW/BY19 BioData.xlsx',
-                       1) %>%
-  mutate(BroodYear = "BY19") %>%
-  mutate(record_id = 1:n()) %>%
-  mutate(Year = paste0("20", str_remove(BroodYear, "^BY")),
-         Year = as.numeric(Year)) %>%
-  gather(tag_loc, TagID, matches('^PIT')) %>%
-  filter(!is.na(TagID)) %>%
-  select(record_id,
-         BroodYear,
-         Year,
-         tag_loc,
-         TagID,
-         Species = `Species(final)`,
-         TrapDate = SurveyDate,
-         Sex = `Sex(final)`,
-         Origin = `Origin(final)`,
-         ForkLength,
-         Age = `Age (scales)`,
-         FinalAge,
-         AdClip = `Ad-clip`,
-         CWT = `CWT (Sn)`) %>%
-  mutate(Age = str_replace(Age, '^r', 'R'))
+```{r, eval = T}
+# read in a list of example tags
+tag_list <- read_csv(here("analysis/data/raw_data",
+              "Asotin2021FemalesDABOM.csv")) %>%
+  select(tag_code = `Tag Code`)
 
 # pull out PIT tag numbers and save as a text file
-bio_df %>%
-  filter(!is.na(TagID)) %>%
-  select(TagID) %>%
-  distinct() %>%
-  write_delim(path = paste0('examp_data/Asotin_Sthd_Tags_', yr, '.txt'),
-              delim = '\n',
-              col_names = F)
+write_delim(tag_list,
+            file = here('analysis/data/examp_data',
+                        paste0('Asotin_Sthd_Tags_', yr, '.txt')),
+            delim = '\n',
+            col_names = F)
+
 ```
 
 ## PTAGIS Query
@@ -210,13 +212,15 @@ The next step is to query PTAGIS for all detections of the fish included on the 
 You will see several query indices on the left side of the query builder, but for the purposes of `PITcleanr` and `DABOM`, we only need to deal with a couple of those. First, under "1 Select Attributes" the following fields are required to work with `PITcleanr`:
 
 * Tag
+* Mark Species
 * Mark Rear Type
 * Event Type
 * Event Site Code
 * Event Date Time
-* Event Release Date Time
 * Antenna
 * Antenna Group Configuration
+* Event Release Date Time
+* Event Release Site Code
 
 You are welcome to include other fields as well, but the ones listed above must be added. Any additional fields will just be included as extra columns in your query output.
 
@@ -255,7 +259,6 @@ org_config = buildConfig()
 ```
 
 Note, the `org_config` object contains **every** INT and MRR detection site included in PTAGIS. Note that in the code above we added information about a site that was not registered in PTAGIS. You now have the opportunity to modify this configuration file however you would like, re-assigning various antennas or sites to different nodes. 
-
 ```{r}
 # customize some nodes based on DABOM framework
 configuration = org_config %>%
@@ -292,99 +295,83 @@ configuration = org_config %>%
 
 ### Parent-Child Table
 
-The next step is to build a parent-child table that describes which nodes are upstream of which nodes. In most cases, when modeling returning adults, the parent node is the first node the adult crosses when returning upstream to spawn and the child node is the next node upstream. The exception being nodes that occur outside of the Asotin (e.g., JD1, ICH) to account for adults that are tagged at Asotin River weir, but then later detected outside of the Asotin basin. The `PITcleanr` function `createParentChildDf()` does this, taking as inputs the data frame of sites in our model and the configuration file we just created. The other input is the starting date (in `YYYYMMDD` format) for this model run, because the function uses that to find the appropriate configuration of the antennas. For this version, we define that starting date as July 1 of the year prior to the spawn year we are interested in.
+The next step is to build a parent-child table that describes which nodes are upstream of which nodes. In most cases, when modeling returning adults, the parent node is the first node the adult crosses when returning upstream to spawn and the child node is the next node upstream. The exception being nodes that occur outside of the Asotin (e.g., JD1, ICH) to account for adults that are tagged at Asotin River weir, but then later detected outside of the Asotin basin. For a small, relatively simple system like the Asotin, it might be easiest to do this by hand, and add some information from the configuration file, namely the rkm.
 
 ```{r}
-# start date is June 1 of the previous year
-# the paste0 function simply pastes together our 'yr' and '0601' into the 'YYYYMMDD' format
-start_date = paste0(yr - 1, '0701')
-
-# build parent-child table
-parent_child = createParentChildDf(site_df,
-                                   configuration,
-                                   startDate = start_date)
-
+parent_child <- tribble(~ parent, ~ child,
+                        "ASOTIC", "ACB",
+                        "ASOTIC", "GEORGC",
+                        "ACB", "AFC",
+                        "ACB", "CCA") %>%
+  left_join(configuration %>%
+              select(parent = site_code, 
+                     parent_rkm = rkm) %>%
+              distinct()) %>%
+  left_join(configuration %>%
+              select(child = site_code, 
+                     child_rkm = rkm) %>%
+              distinct())
 ```
 
 ### Clean PTAGIS Data
 
-The final step of this data cleaning process is run the PTAGIS detections through the `processCapHist_PRD()` function in `PITcleanr` which will assign each detection to a node in the model, and then collapse the output so we are left, for each tag, only one detection on a node before that tag is sighted on a different node.
+The final step of this data cleaning process is run the PTAGIS detections through the `prepWrapper()` function in `PITcleanr` which will assign each detection to a node in the model, compress the observations so multiple detections on the same node are collapsed into a single row, add directional movement indicators based on the parent-child table, and provide suggestions for which detections should be filtered out before running DABOM. This function can also save the output into an Excel file to be examined (by setting the `save_file = T` argument). The `min_obs_date` argument will filter out observations prior to that date, while the `max_obs_date` argument will ensure that all detections after that date are not retained. If either are left blank, no such filtering is done.
 
-First, use the `read_csv()` function to read in all of the detections we output from our PTAGIS query above. In the example below, we use the `paste0()` function and some additional code to recreate the filename of the .csv output we created above. Alternatively, you can just use `read_csv()` and the directory and filename of your .csv output to read in your detections and create an object called `observations`.
-
-```{r, eval = F}
+```{r, eval = T}
 # get raw observations from PTAGIS
 # These come from running a saved query on the list of tags to be used
-observations = read_csv(paste0('../data/raw_data/PTAGIS/Asotin_Sthd_', yr, '_CTH.csv')) %>%
-    filter(`Event Site Code Value` != "ORPHAN")
+ptagis_file = here("analysis/data/examp_data",
+                   paste0("Asotin_Sthd_", yr, ".csv"))
 
-# process those observations with PITcleanr, using Upper Columbia-specific function
-proc_list = processCapHist_PRD(startDate = start_date,
-                               configuration = configuration,
-                               parent_child = parent_child,
-                               observations = observations,
-                               # use this to filter out observations past June 1
-                               last_obs_date = format(ymd(start_date) + years(1) + months(1), "%Y%m%d"),
-                               truncate = T,
-                               site_df = site_df,
-                               step_num = 1,
-                               save_file = F)
+# recode the PTAGIS observations of double tagged fish so that the tag code matches the TagID (not TagOther)
+ptagis_obs = readCTH(ptagis_file)
 
+# any orphaned or disowned tags?
+qcTagHistory(ptagis_obs, T)
+
+# compress and process those observations with PITcleanr
+prepped_ch = PITcleanr::prepWrapper(ptagis_file = ptagis_obs,
+                                    configuration = configuration,
+                                    parent_child = parent_child %>%
+                                      addParentChildNodes(configuration = configuration),
+                                    ignore_event_vs_release = T,
+                                    add_tag_detects = T,
+                                    save_file = T,
+                                    file_name = here('analysis/data/examp_data', 
+                                                     paste0('Asotin_Sthd_', yr, '_PITcleanr.xlsx')))
 ```
-
-```{r, echo = F}
-load(paste0("../data/derived_data/model_fits/Asotin_Sthd_", yr,'_DABOM.rda'))
-```
-
-The output of the `processCapHist_PRD()` function (`proc_list` in our example) is a list, containing four elements:
-
-* *ValidPaths*: a data frame containing the path a fish would need to take to reach each detection node, including all the nodes it would need to pass along the way (regardless of whether it is detected at each). The *ValidPaths* can be accessed using `proc_list$ValidPaths` or `proc_list[[1]]`.
-
-* *NodeOrder*: a data frame containing each node in the model, the node order (how many nodes to cross to arrive there from Asotin River weir), the "path" a tag would take to get there consisting of all the nodes it could be detected at along the way, which site that node is associated with, and the RKM of that site from PTAGIS metadata. The *NodeOrder* can easily be accessed using `proc_list$NodeOrder` or `proc_list[[2]]`.
-
-* *ValidObs*: a data frame containing all the observations to be deemed "valid". This consists of translating detections from site/antenna combinations into detections on nodes and then simplifing consecutive hits on the same node. The *ValidObs* can easily be accessed using `proc_list$ValidObs` or `proc_list[[3]]`.
-
-* *ProcCapHist*: The "cleaned" capture histories, with a row for each detection that has been kept. It shows the tag ID, the date that tag was in the weir, the first and last observed date and time on that node, the PTAGIS site ID associated with that node, whether the tag was moving upstream or downstream (based on the previous observation), and two columns containing **ProcStatus** for "processed status". **AutoProcStatus** is `PITcleanr`'s best guess as to whether the observation on that node should be kept (`TRUE`) or discarded (`FALSE`). **UserProcStatus** is where the end user can define that for themselves. The *ProcCapHist* can be accessed using `proc_list$ProcCapHist` or `proc_list[[4]]`.
-
-After this step, the results of *ProcCapHist* can be saved to a .txt, .csv, .xls, or .xlsx file, to be examined by a fisheries biologist. To save the results, simply change the `save_file` argument in `processCapHist_PRD()` to `T` or `TRUE` and add the `file_name` containing the file name (with possible extension) and optionally, the directory, to be saved to (e.g. *"output/PITcleanr/Asotin_Sthd_2019.csv"*). NOTE: to save an .xls or .xlsx file may require installation of [Perl](https://www.perl.org/get.html) depending on your OS.
 
 ## Examine PITcleanr Output
 
-The *ProcCapHist* in `proc_list` now contains the cleaned, processed capture histories for each PIT tag with the **AutoProcStatus** column containing `PITcleanr`'s best guess of whether the observation should be used in the DABOM model and a **UserProcStatus** column allowing the end user to make their own determination of whether an observation should be used. For all tags with no issues (i.e. the detections move steadily upstream after Asotin River weir), the **UserProcStatus** column has been set to `TRUE`. However, for any tags with potential detections in question, the **UserProcStatus** is (blank). In this case, the user merely needs to open the output, perhaps in Excel, and filter the **UserProcStatus** selecting all the rows with a (blank). Initally, that will include all the detections for the tags in question. By examing the dates and the nodes, and possibly considering the suggestions made in the **AutoProcStatus** column by `PITcleanr`, the user needs to fill in each blank with either `TRUE` or `FALSE` to show whether the detection at the node should be kept or ignored for the DABOM model, respectively.
+Within this output (either in R, or in the saved Excel file), all the rows where the field `user_keep_obs` is NA or blank must be filled in with either `TRUE` or `FALSE`. The field `auto_keep_obs` provides a suggestion, but the ultimate choice is up to the user. The `path` fild shows the path the tag must have taken to get to that detection node, while the `tag detects` field shows all the sites where that tag was actually detected.
 
-One of the assumptions in the DABOM model is that fish are making a one-way upstream migration, which ends in their spawning location. So if a fish is detected moving past the TUM array, for example, and later seen moving past the ICL site, both of those observations cannot be kept in the model. Based on the observation dates (**ObsDate** and **lastObsDate**), the user will need to decide where the final spawning location was for that fish. If it was past TUM, then the rows where the **SiteID** is ICL should be marked `FALSE` in the "UserProcStatus" column, and the other one marked `TRUE`. Instead, if it appears the fish spawned in Icicle Creek, then the TUM rows should be marked `FALSE`. The default action taken by the **AutoProcStatus** column is to keep the latest observation, so it would default to keeping the ICL observations and dropping the TUM ones.
+One of the assumptions in the DABOM model is that fish are making a one-way upstream migration, which ends in their spawning location. So if a fish is detected moving past the CCA array, for example, and later seen moving past the AFC site, both of those observations cannot be kept in the model. Based on the observation dates (**min_det** and **max_det**), the user will need to decide where the final spawning location was for that fish. If it was past CCA, then the rows where the **node** is AFCA0 or AFCB0 should be marked `FALSE` in the **user_keep_obs** column, and the last rows where **node** is CCAB0 or CCAB0 should be marked `TRUE`. Instead, if it appears the fish spawned past AFC, then the CCAB0 and CCAA0 rows should be marked `FALSE`. The default action taken by the **auto_keep_obs** column is to keep the latest observation, so it would default to keeping the AFC observations and dropping the CCA ones.
 
-```{r ptagis-examp, echo = F}
-# proc_list[[4]] is the second element of the proc_list object i.e. the ProcCapHist
-proc_list[[4]] %>%
-  filter(TagID == "3DD.00779FDCBB") %>%
-  slice(1:5) %>%
-  select(TagID:lastObsDate, SiteID, Node, AutoProcStatus) %>%
-  kable(booktabs = T,
-        caption = "Example of PITcleanr output for one PIT tag.") %>%
-  kable_styling()
-  
+The next step would be for a user to filter the prepared data for all rows with `user_keep_obs == NA`, and then fill in the `user_keep_obs` column by hand for each detection node. These decisions could be guided by the `auto_keep_obs` column (`PITcleanr`'s best guess), but could also be informed by the date of detections and the user's biological knowledge of the system. Before sending the data along to DABOM, all the missing `user_keep_obs` rows should be filled out as either `TRUE` or `FALSE`. The user can then remove all the rows where `user_keep_obs == FALSE`. For our example, we'll accept all the `auto_keep_obs` recommendations.
+
+```{r}
+filter_ch = prepped_ch %>%
+  mutate(user_keep_obs = if_else(is.na(user_keep_obs),
+                                 auto_keep_obs,
+                                 user_keep_obs)) %>%
+  filter(user_keep_obs)
 ```
+
 
 ### Summarise Information for Each Tag
 
-At this point, some summary information can be obtained for each tag in the valid tag list, including potential spawning (i.e. final) location. This is based on the furthest model node that the tag was detected at, after filtering out unwanted observations (see [Examine PITcleanr Output]). The `summariseTagData()` function also takes biological information obtained at the weir (e.g. the `bio_df` object created above), and the output can be used to summarise, for example, sex ratios, age or length distributions, etc. for various nodes in the network.
+At this point, some summary information can be obtained for each tag in the valid tag list, including potential spawning (i.e. final) location. This is based on the furthest model node that the tag was detected at, after filtering out unwanted observations (see [Examine PITcleanr Output]). The `summarizeTagData()` function also takes biological information obtained at the weir, and the output can be used to summarize, for example, sex ratios, age or length distributions, etc. for various nodes in the network.
 
 ```{r}
-tag_summ = proc_list$ProcCapHist %>%
-  filter(AutoProcStatus) %>%
-  mutate(UserProcStatus = AutoProcStatus) %>%
-  summariseTagData(trap_data = bio_df %>%
-                     filter(TagID %in% proc_list$ProcCapHist$TagID) %>%
-                     group_by(TagID) %>%
-                     slice(1) %>%
-                     ungroup())
+tag_summ = summarizeTagData(filtered_obs = filter_ch,
+                            bio_data = NULL)
 ```
 
 ```{r}
 tag_summ %>%
   slice(1:7) %>%
   kable(booktabs = T,
+        linesep = '',
         caption = 'Example of tag summaries.') %>%
   kable_styling()
 ```
@@ -397,398 +384,249 @@ Congratulations! You have now prepared all of your data and detections to build 
 
 ```{r}
 library(DABOM)
-library(jagsUI)
+library(rjags)
 ```
 
-The DABOM model requires as input a capture or detection history of every valid tag. This is a series of `1`'s and `0`'s depicting whether that tag was detected (or not) on each node in the network. The `DABOM` package includes a function `createDABOMcapHist()` to create these detection histories, based on the output from `PITcleanr`. To make the model easier to manipulate in the future, e.g. if more sites/arrays are added, we have included an option to split the complete detection histories into separate matrices to feed into DABOM. The argument `split_matrices = TRUE` shown below in the `createDABOMcapHist()` function does just that. Alternatively, to create a single matric with the entire detection history for each tag (e.g., for diagnostic purposes), simply set that argument to `FALSE`.
+For `DABOM`, the user will need
 
-In this example, we simply set the **UserProcStatus** to be the same as the **AutoProcStatus** (`mutate(UserProcStatus = AutoProcStatus`) containing `PITcleanr`'s suggestion on whether an observation should be used in DABOM, and then remove any observation where **UserProcStatus** equals `FALSE`. Alternatively, one could use any **UserProcStatus** determined by the user after examining the detection histories (see [Examine PITcleanr Output]).
+* a configuration file
+* a parent-child table
+* a filtered detection history (based on a PTAGIS query)
+* the origin of each tag
+
+We've constructed the first three in the sections above. For the last input, we'll need to know the origin (hatchery or wild/naturally produced) of each tag. This involves constructing a tibble with two columns: `tag_code` and `origin`.  The user might be able to do this based on data taken when tagging the fish, or it could be constructed from the PTAGIS file:
 
 ```{r}
-# pull out the detections we are going to keep in the processed capture history
-proc_ch <- proc_list$ProcCapHist %>%
-  mutate_at(vars(UserProcStatus),
-              list(as.logical)) %>%
-    mutate(UserProcStatus = if_else(is.na(UserProcStatus),
-                                    AutoProcStatus,
-                                    UserProcStatus)) %>%
-    filter(UserProcStatus) %>%
-  filter(TagID %in% unique(bio_df$TagID))
-
-# put them into matrix form to be fed into JAGS
-dabom_list = createDABOMcapHist(proc_ch,
-                                proc_list$NodeOrder,
-                                split_matrices = T)
+fish_origin = suppressMessages(read_csv(ptagis_file)) %>%
+  select(tag_code = `Tag Code`,
+         origin = `Mark Rear Type Name`) %>%
+  distinct() %>%
+  mutate(origin = str_sub(origin, 1, 1),
+         origin = recode(origin,
+                         "U" = "W"))
 ```
 
-This version of DABOM was created to be run on both hatchery and wild origin fish, using all tags and observations together to estimate detection probabilities, but allowing for different movement rates between hatchery and wild fish, since presumably they may be going to very different places. Therefore, one of the inputs is a vector containing the origin for each fish (`1` for wild fish, `2` for hatchery), called `fishOrigin`, which must be added to the input list `dabom_list`.
+`DABOM` currently has the ability to handle up to two types of fish (e.g. hatchery and wild). Therefore, the `origin` column of `fish_origin` should only contain a maximum of two distinct entries. Note that in the example above, we have marked all the fish with "Unknown" or "U" origin as wild, to conform to this. It is fine if all the fish have the same origin (e.g. all are wild). 
+
+Now our data is ready for DABOM.
+
+# Write JAGS Model
+
+The DABOM model is implemented in a Bayesian framework, using JAGS software. JAGS requires a model file (.txt format) with specific types of syntax. See the JAGS user manual for more detail about JAGS models. The `DABOM` package contains a function to write this model file, based on the relationships defined in the parent-child table, and how nodes are mapped to sites in the configuration file. 
 
 ```{r}
-dabom_list$fishOrigin = createDABOMcapHist(proc_ch,
-                                proc_list$NodeOrder,
-                                split_matrices = F) %>%
-  left_join(bio_df %>%
-              select(TagID, Origin)) %>%
-  select(TagID, Origin) %>%
-  mutate(Origin = recode(Origin,
-                         'W' = 1,
-                         'H' = 2)) %>%
-  pull(Origin)
-```
+library(DABOM)
 
-We have compiled all of the necessary inputs for DABOM. Next, we need to generate the DABOM model that the JAGS software will use.
-
-## DABOM JAGS Model
-
-To run the DABOM model, we need to write the text file with the Asotin DABOM model that the JAGS software will use. The `DABOM` R package contains a function `writeDABOM` to write a generic version for the Asotin River weir version of DABOM:
-
-```{r, eval = F}
 # file path to the default and initial model
-basic_modNm = here('analysis/model_files',
-                   "Asotin_DABOM.txt")
+basic_mod_file = here('analysis/data/examp_data',
+                      "Asotin_DABOM.txt")
 
-# write the DABOM model for JAGS
-writeDABOM(file_name = basic_modNm)
+writeDABOM(file_name = basic_mod_file,
+           parent_child = parent_child,
+           configuration = configuration)
 
 ```
 
-We then need to update that "default" DABOM model based on our tag detections. For starters, if no tags were detected at a particular node in the model, we need to set that node's detection probability to 0, since it would be difficult if not impossible to estimate. Or that node / site may not have existed or been in operation for the year we are running the model. Similarly, if a terminal site contains only a single array, or only had detections on a single array, that array has its detection probability fixed to 100%, because without detections upstream of a site there is no way to estimate the detection probability there. Setting the detection probability to 100% may lead to a conservative estimate of escapement past that particular site (i.e. escapement was *at least* this much), but since many terminal sites are further upstream in the watershed, where most detection probabilities are likely close to 100% already, this may not be a bad assumption to make. The function `fixNoFishNodes()` in `DABOM` re-writes the default JAGS model with one specific to the year we are running, and saves it as a different text file.
+## Modify JAGS Model
+
+Often the user will have a parent-child table based on all the detection sites they are interested in using. However, there may have been no fish detected at some of those sites that year. Rather than let the model churn away on estimating parameters that have no data to inform them, we have devised a function to "turn off" some parameters. Some of these parameters are specific to the origin of the fish, such as turning off movement parameters past a particular site only for hatchery fish, if no hatchery fish were observed there, so the `fish_origin` input is required.
+
+This includes setting the detection probability to 0 for nodes that had no detections (or were not in place during the fishes' migration), setting the detection probability to 100% for nodes that function as single arrays with no upstream detection sites (because there is no way to estimate detection probability there), and fixing some movement probabilities to 0 if no tags were observed along that branch. Setting the detection probability to 100% may lead to a conservative estimate of escapement past that particular site (i.e. escapement was *at least* this much), but since many terminal sites are further upstream in the watershed, where most detection probabilities are likely close to 100% already, this may not be a bad assumption to make. The function `fixNoFishNodes` updates the initial JAGS file with these improvements, writes a new JAGS .txt file, and sends a message to the user about what it has done. 
 
 ```{r}
 # filepath for specific JAGS model code for species and year
-mod_path = here('analysis/model_files',
-                paste0('Asotin_DABOM_', yr, '.txt'))
+final_mod_file = here('analysis/data/examp_data',
+                      paste0("Asotin_DABOM_", yr, ".txt"))
 
 # writes species and year specific jags code
-fixNoFishNodes(basic_modNm,
-               mod_path,
-               proc_ch,
-               proc_list$NodeOrder)
+fixNoFishNodes(init_file = basic_mod_file,
+               file_name = final_mod_file,
+               filter_ch = filter_ch,
+               parent_child = parent_child,
+               configuration = configuration,
+               fish_origin = fish_origin)
 
 ```
 
-Based on the code in that modified model text file for our DABOM run, we can then extract the names of the parameters we wish to save. 
 
-```{r}
-# Tell JAGS which parameters in the model that it should save.
-jags_params = setSavedParams(model_file = mod_path)
-```
+# Run JAGS Model
 
-Now we're ready to set some intial values for the JAGS model. We don't set the values for the detection or movement probabilities; however, we do need to set the initial values for where fish are that have been detection. Otherwise, JAGS will throw an error because a tag has a randomly selected initial value (e.g. Chiwawa River), but it was detected elsewhere (e.g. Little White River).
+To run the JAGS model, we need to set some initial values, create inputs in a format conducive to JAGS, and set which parameters we would like to track.
 
-```{r}
+## Set Initial Values
+
+The only initial values we need to set are for where tags are in the system, based on their observed detections. Otherwise, JAGS could randomly assign them an initial value of being in one tributary, when they are actually observed in another, which will cause JAGS to throw an error and crash. 
+
+```{r, eval = T}
 # Creates a function to spit out initial values for MCMC chains
-init_fnc = setInitialValues_PRA(dabom_list)
+init_fnc = setInitialValues(filter_ch = filter_ch,
+                            parent_child = parent_child,
+                            configuration = configuration)
+
 ```
 
-Finally, we can compile all the input data necessary to run the JAGS model using the `createJAGSinputs_PRA()` function. This includes the capture history matrices, the origin of each tag, and the priors for the Dirichlet vector that goes with each node with multiple branches. That prior is merely `1`'s and `0`'s, turning branches off if there were no observed tags there, and preventing the model from trying to estimate movement parameters to places with no detections.
+## Create JAGS Input
 
-```{r}
+JAGS requires the data to be input in the form of a list. The `writeDABOM` function has also assumed a particular format and names for the data inputs. So `DABOM` has a function to transform the data into the right format expected by JAGS:
+
+```{r, eval = T}
 # Create all the input data for the JAGS model
-jags_data = createJAGSinputs_PRA(dabom_list)
+jags_data = createJAGSinputs(filter_ch = filter_ch,
+                             parent_child = parent_child,
+                             configuration = configuration,
+                             fish_origin = fish_origin)
 ```
 
-## Run DABOM
+## Set Parameters to Save
 
-To actually run DABOM, we use the `jags.basic()` function in the `jagsUI` package. Part of the inputs to that function include the Monte Carlo Markov chain (MCMC) parameters. We recommend:
+The user needs to tell JAGS which parameters to track and save posterior samples for. Otherwise, the MCMC algorithms will run, but the output will be blank. Based on the model file, `DABOM` will pull out all the detection and movement parameters to track:
 
-* 4 chains (`n.chains = 4`)
-* 5,000 iterations (`n.iter = 5000`)
-* 2,500 of which are burn-in (`n.burnin = 2500`)
-* Keep every 10 iterations (`n.thin = 10`)
-
-This provides a total of 1,000 draws from the posterior. In our experience, this leads to convergence of all the parameters, without taking too long to run. Setting the seed in `R` means you can reproduce the exact MCMC draws. 
-
-```{r, eval = F}
-# Run the model
-set.seed(12)
-dabom_mod <- jags.basic(data = jags_data,
-                        inits = init_fnc,
-                        parameters.to.save = jags_params,
-                        model.file = mod_path,
-                        n.chains = 4,
-                        n.iter = 5000,
-                        n.burnin = 2500,
-                        n.thin = 10,
-                        DIC = T)
+```{r, eval = T}
+# Tell JAGS which parameters in the model that it should save.
+jags_params = setSavedParams(model_file = final_mod_file)
 ```
 
-What is returned (from the `jags.basic` function) is an `mcmc.list` object. The user can generate many diagnostic plots and statistics, using packages such as `coda`, `mcmcr`, `shinystan`, or even `postpack` available [here](https://github.com/bstaton1/postpack) on [www.github.com/](www.github.com/).  
+## Run MCMC
 
-## Summarise DABOM results
+R users have developed several different packages that can be used to connect to the JAGS software and run the MCMC algorithm. Here, we will present example code that uses the `rjags` package, which was written by the author of the JAGS software. First, the user runs an adaptation or burn-in phase, which requires the path to the JAGS model file, the input data, any initial values function, the number of MCMC chains to run and the number of adaptation iterations to run. To test that the model is working, a user may set `n.chains = 1` and `n.adapt` to a small number like 5, but to actually run the model we recommend:
 
-Now that we have completed our DABOM run, we can summarise a number of results from the `dabom_mod` `mcmc.list` object we created above including detection and movement (i.e. transition) probabilties. In addition, transition probabilities can be multiplied by some estimate of escapement in the system (e.g. Asotin weir) to get abundance to any node or group of nodes (e.g. a tributary). 
+* `n.chains = 4`
+* `n.adapt = 5000`
 
-### Detection Probabilities
+To make the results fully reproducible, we recommend setting the random number generator seed in R, using the `set.seed()` function. This will ensure the same MCMC results on a particular computer, although the results may still differ on different machines.
 
-Detection probabilities are easily summarised using the function `summariseDetectProbs()`:
-
-```{r}
-# summarise detection probabilities
-detect_summ = summariseDetectProbs(dabom_mod = dabom_mod,
-                                   capHist_proc = proc_list$proc_ch,
-                                   cred_int_prob = 0.95) %>%
-  # remove nodes that were not saved by JAGS
-  filter(!is.na(mean))
-```
-
-```{r}
-detect_summ %>%
-  filter(sd > 0) %>%
-  arrange(desc(sd)) %>%
-  kable(digits = 3,
-        booktabs = T,
-        caption = 'Summary of detection parameters.') %>%
-  kable_styling()
-```
-
-### Transition Probabilities
-
-The movement or transition probabilities have to be extracted, and then multiplied appropriately, so that the movement past a site far upstream in the network also accounts for moving past all of the downstream sites before that one. There is a function specific to the Asotin weir version of DABOM `compileTransProbs_ASOTIC` to do this for you. The **param** column in the `trans_summ` summary table below refers to the probability of a tag moving *past* that site, or if the parameter ends in "_bb", the probability of falling into the black box above that site.
-
-```{r}
-# compile all movement probabilities, and multiply them appropriately
-trans_df = compileTransProbs_ASOTIC(dabom_mod)
-```
-
-```{r}
-# summarize transition probabilities
-trans_summ = trans_df %>%
-  group_by(Origin, param) %>%
-  summarise(mean = mean(value),
-            median = median(value),
-            mode = estMode(value),
-            sd = sd(value),
-            lowerCI = coda::HPDinterval(coda::as.mcmc(value))[,1],
-            upperCI = coda::HPDinterval(coda::as.mcmc(value))[,2]) %>%
-  mutate_at(vars(mean, median, mode, sd, matches('CI$')),
-            list(~ if_else(. < 0, 0, .))) %>%
-  ungroup()
-
-trans_summ %>%
-  filter(sd > 0) %>%
-  kable(digits = 3,
-        booktabs = T,
-        caption = 'Summary of movement parameters.') %>%
-  kable_styling()
-```
-
-# Abundance Estimates
-
-```{r install-stadem, eval = F}
-# install STADEM
-devtools::install_github("KevinSee/STADEM")
-```
-
-Finally, we want to generate estimates of abundance for nodes or groups of nodes (e.g. tributaries or populations). To accomplish this, the next step is to multiply the transition probabilities from `DABOM` by the total escapement at Asotin weir. There is an additional R package, `STADEM` (*St*ate-space *A*dult *D*am *E*scapement *M*odel) that contains a function `getWindowCounts()` to query the window counts at a variety of dams within the Columbia River Basin, including Asotin weir, on a daily time-step. Those daily counts can be summed up for the season:
-
-```{r}
-# load STADEM
-library(STADEM)
-
-# window count
-tot_win_cnt = getWindowCounts(dam = 'PRD',
-                              spp = 'Steelhead',
-                              start_date = paste0(yr-1, '0601'),
-                              end_date = paste0(yr, '0531')) %>%
-  summarise_at(vars(win_cnt),
-               list(sum)) %>%
-  pull(win_cnt)
-
-```
-
-We can also query data related to the re-ascension rate, what percentage of the fish counted at the window have fallen back and re-ascended the dam, and are therefore counted twice at the window. This is also done through a query in the `STADEM` package.
-
-```{r}
-# reascension data
-reasc_data = queryPITtagData(damPIT = 'PRA',
-                             spp = 'Steelhead',
-                             start_date = paste0(yr-1, '0601'),
-                             end_date = paste0(yr, '0531'))
-```
-
-Now the window counts can be adjusted for re-ascension rates, as well as divided by origin, with approprate standard errors.
-
-```{r}
-library(msm) # for the deltamethod
-
-# adjust for re-ascension and origin
-org_escape = reasc_data %>%
-    mutate(SpawnYear = yr,
-           TagIDAscentCount = ifelse(is.na(TagIDAscentCount),
-                                     0, TagIDAscentCount),
-           ReAscent = ifelse(TagIDAscentCount > 1, T, F)) %>%
-    group_by(Species, SpawnYear, Date) %>%
-    summarise(tot_tags = n_distinct(TagID),
-              reascent_tags = n_distinct(TagID[ReAscent])) %>%
-    ungroup() %>%
-    group_by(Species, SpawnYear) %>%
-    summarise_at(vars(matches('tags')),
-                 list(sum),
-                 na.rm = T) %>%
-    ungroup() %>%
-    mutate(reascRate = reascent_tags / tot_tags,
-           reascRateSE = sqrt(reascRate * (1 - reascRate) / tot_tags),
-           totWinCnt = tot_win_cnt,
-           adjWinCnt = tot_win_cnt * (1 - reascRate),
-           adjWinCntSE = tot_win_cnt * reascRateSE) %>%
-    bind_cols(bio_df %>%
-                group_by(Origin) %>%
-                summarise(nTags = n_distinct(TagID)) %>%
-                pivot_wider(names_from = "Origin",
-                            values_from = "nTags",
-                            values_fill = list(nTags = as.integer(0))) %>%
-                ungroup() %>%
-                mutate(propW = W / (W + H),
-                       propH = 1 - propW,
-                       propOrgSE = sqrt((propW * (1 - propW)) / (W + H)))) %>%
-    mutate(Hescp = propH * adjWinCnt,
-           HescpSE = deltamethod(~ x1 * x2,
-                                 mean = c(propH, adjWinCnt),
-                                 cov = diag(c(propOrgSE, adjWinCntSE)^2))) %>%
-    mutate(Wescp = propW * adjWinCnt,
-           WescpSE = deltamethod(~ x1 * x2,
-                                 mean = c(propW, adjWinCnt),
-                                 cov = diag(c(propOrgSE, adjWinCntSE)^2))) %>%
-    select(Species, SpawnYear, matches('escp')) %>%
-    pivot_longer(-(Species:SpawnYear),
-                 names_to = "var",
-                 values_to = "value") %>%
-    mutate(Origin = if_else(grepl('^H', var),
-                            'Hatchery',
-                            'Natural'),
-           param = if_else(grepl('SE$', var),
-                           'tot_escp_se',
-                           'tot_escp')) %>%
-    select(-var) %>%
-    pivot_wider(names_from = "param",
-                values_from = "value")
-```
-
-We then take each draw from the transition probability posteriors, and multiply it by the appropriate (by origin) adjusted total escapement. This provides posteriors of escapement past every detection point, which can then be summarised. 
-
-```{r}
-# translate movement estimates to escapement
-# how many samples were taken from the posteriors?
-n_samps = trans_df %>%
-  group_by(Origin, param) %>%
-  summarise(nIters = n()) %>%
-  ungroup() %>%
-  pull(nIters) %>%
-  unique()
-
+```{r, eval = T}
+library(rjags)
 set.seed(5)
-escape_summ = org_escape %>%
-  split(list(.$Origin)) %>%
-  map_df(.id = 'Origin',
-         .f = function(x) {
-           tibble(totEsc = rnorm(n_samps, x$tot_escp, x$tot_escp_se)) %>%
-             mutate(iter = 1:n_samps)
-         }) %>%
-  left_join(trans_df %>%
-              group_by(Origin, param) %>%
-              mutate(iter = 1:n()) %>%
-              select(-chain) %>%
-              rename(prob = value) %>%
-              slice(sample.int(max(iter), n_samps)) %>%
-              ungroup()) %>%
-  mutate(value = totEsc * prob) %>%
-  group_by(Origin, param) %>%
-  summarise(mean = mean(value),
-            median = median(value),
-            mode = estMode(value),
-            sd = sd(value),
-            # skew = moments::skewness(value),
-            # kurtosis = moments::kurtosis(value),
-            lowerCI = coda::HPDinterval(coda::as.mcmc(value))[,1],
-            upperCI = coda::HPDinterval(coda::as.mcmc(value))[,2]) %>%
-  mutate_at(vars(mean, median, mode, sd, matches('CI$')),
-            list(~ if_else(. < 0, 0, .))) %>%
-  ungroup()
+
+jags = jags.model(file = final_mod_file,
+                  data = jags_data,
+                  inits = init_fnc,
+                  n.chains = 4,
+                  n.adapt = 5000)
+```
+
+If this code returns a message `Warning message: Adaptation incomplete`, this indicates further burn-in iterations should be run, which the user can do by "updating" the `jags` object using this code (and setting the `n.iter` parameter to something large enough):
+
+```{r, eval = F}
+update(jags, 
+       n.iter = 1000)
+```
+
+Finally, once the adaptation or burn-in phase is complete, the user can take MCMC samples of the posteriors by using the `coda.samples` function. This is where the user tells JAGS which parameters to track. The user can also set a thinning paramater, `thin`, which will save every nth sample, instead of all of them. This is useful to avoid autocorrelations in the MCMC output. Again, we would recommend the following settings:
+
+* `n.iter = 5000`
+* `thin = 10`
+
+Across four chains, this results in (5000 samples / 10 (every 10th sample) * 4 chains) 2000 samples of the posteriors.
+
+```{r, eval = T}
+dabom_samp = coda.samples(model = jags,
+                          variable.names = jags_params,
+                          n.iter = 5000,
+                          thin = 10)
 
 ```
 
-If we'd like to summarise escapement at the population scale, that's just a matter of extracting some estimates and adding a few of them together (i.e. include CLK with Wenatchee estimates, and FST with Okanogan estimates).
+# Results
+
+## Detection Probability Estimates
+
+If a user is interested in the estimates of detection probability, estimated at every node in the DABOM model, the `DABOM` package provides a simple function to extract these, `summariseDetectProbs()`. The output includes the number of distinct tags observed at each node, as well as the mean, median, mode and standard deviation of the posterior distribution. It also includes the highest posterior density interval (HPDI) of whatever $\alpha$-level the user desires (using the `cred_int_prob` argument), the default value of which is 95\%. The HPDI is the narrowest interval of the posterior distribution that contains the $\alpha$-level mass, and is the Bayesian equivalent of a confidence interval. 
 
 ```{r}
-# generate population level estimates
-pop_summ = org_escape %>%
-  split(list(.$Origin)) %>%
-  map_df(.id = 'Origin',
-         .f = function(x) {
-           tibble(totEsc = rnorm(n_samps, x$tot_escp, x$tot_escp_se)) %>%
-             mutate(iter = 1:n_samps)
-         }) %>%
-  left_join(trans_df %>%
-              group_by(Origin, param) %>%
-              mutate(iter = 1:n()) %>%
-              select(-chain) %>%
-              rename(prob = value) %>%
-              slice(sample.int(max(iter), n_samps)) %>%
-              ungroup()) %>%
-  mutate(value = totEsc * prob) %>%
-  select(Origin, iter, param, value) %>%
-  pivot_wider(names_from = "param",
-              values_from = "value") %>%
-  mutate(Wenatchee = past_LWE + past_CLK,
-         Entiat = past_ENL,
-         Methow = past_LMR,
-         Okanogan = past_OKL + past_FST,
-         `Below Priest` = dwnStrm,
-         `Wells Pool` = WEA_bb) %>%
-  select(Origin, iter, Wenatchee:`Wells Pool`) %>%
-  pivot_longer(cols = Wenatchee:`Wells Pool`,
-               names_to = 'Population',
-               values_to = "escp") %>%
-  group_by(Population, Origin) %>%
-  summarise(mean = mean(escp),
-            median = median(escp),
-            mode = estMode(escp),
-            sd = sd(escp),
-            # skew = moments::skewness(escp),
-            # kurtosis = moments::kurtosis(escp),
-            lowerCI = coda::HPDinterval(coda::as.mcmc(escp))[,1],
-            upperCI = coda::HPDinterval(coda::as.mcmc(escp))[,2]) %>%
-  mutate_at(vars(mean, median, mode, sd, matches('CI$')),
-            list(~ if_else(. < 0, 0, .))) %>%
-  ungroup()
-
+# summarize detection probability estimates
+detect_summ = summariseDetectProbs(dabom_mod = dabom_samp,
+                                   filter_ch = filter_ch,
+                                   cred_int_prob = 0.95)
 ```
 
-```{r}
-pop_summ %>%
-  kable(digits = 0,
-        caption = 'Population-scale escapement estimates.') %>%
+```{r, echo = F}
+detect_summ %>%
+  kable(digits = 3,
+        linesep = '',
+        booktabs = T) %>%
   kable_styling()
 ```
 
-## Save Results
 
-Finally, we can save these results to an Excel spreadsheet, including the population estimates, estimates past each detection site, and the detection probabilities for each node.
+## Estimate Escapement
 
-```{r, eval = F}
-# write results to an Excel file
-save_list = list('Population Escapement' = pop_summ %>%
-                   # select(-skew, -kurtosis) %>%
-                   mutate_at(vars(-pop),
-                             list(round),
-                             digits = 1),
-                 'All Escapement' = escape_summ %>%
-                   # select(-skew, -kurtosis) %>%
-                   mutate_at(vars(-location),
-                             list(round),
-                             digits = 1),
-                 'Detection' = detect_summ %>%
-                   mutate_at(vars(-Node),
-                             list(round),
-                             digits = 3))
+To estimate escapement past each detection point, DABOM requires two things: an estimate of the movement or transition probability past that point, and an estimate of the total escapement somewhere in the stream network. Most of the time, that estimate of total escapement is provided at the tagging or release site (e.g. Tumwater Dam), and we'll assume that's what is available for this example. 
 
-WriteXLS(x = save_list,
-         ExcelFileName = paste0('examp_data/Asotin_est_', spp, '_', yr, '_', format(Sys.Date(), '%Y%m%d'), '.xlsx'),
-         AdjWidth = T,
-         AutoFilter = F,
-         BoldHeaderRow = T,
-         FreezeRow = 1)
+### Compile Transition Probabilities
 
+Compiling the transition probabilities is both a matter of ensuring that the parameters from JAGS match the site codes of each detection point (so that movement past CHL is named as such), but also multiplying some transition probabilities together when appropriate. For instance, the ultimate probability that a tag moves past CHU is the probability of moving from TUM past CHL, and then from CHL past CHU. At this time, these multiplication steps are hard-coded into a few functions, one for each version of DABOM that currently exists:
+
+* Lower Granite Dam: `compileTransProbs_GRA()`
+* Priest Rapids Dam: `compileTransProbs_PRA()`
+* Tumwater Dam: `compileTransProbs_TUM()`
+* Prosser Dam: `compileTransProbs_PRO()`
+* Asotin Weir: `compileTransProbs_ASOTIC()`
+
+```{r}
+trans_df = compileTransProbs_ASOTIC(dabom_mod = dabom_samp,
+                                 parent_child = parent_child)
 ```
 
+The resulting tibble contains a column describing the MCMC chain that sample is from (`chain`) the overall iteration of that sample (`iter`), the origin, either one or two (`origin`), the parameter (`param`) which is coded such that the site code refers to the probability of moving past that site, and the value of the posterior sample (`value`). Some parameters end in `_bb`, which refers to the tags that moved past a particular branching node, but did not move into one of the subsequent branches. The "bb" stands for "black box", meaning we're not sure exactly what happened to those fish. They have spawned in an area above that branching node, but below upstream detection points, they may have died in that area (due to natural causes or fishing) or they may have moved downstream undetected and were not seen at any other detection sites. 
+
+
+### Total Escapement
+
+At the Asotin weir, there may be an estimate of total abundance that can be applied. Or if the user is only interested in proportions or distribution of spawning females, just use a total escapement of `1`. 
+
+```{r}
+tot_escp = tibble(origin = c(1,2),
+                    tot_escp = c(1,0))
+```
+
+Each of the transition probabilities can then be multiplied by this total escapement, resulting in posterior samples of escapement or abundance past each detection site. If there is any uncertainty in the total escapement, we recommend bootstrapping samples of the total escapement with the appropriate mean and standard error (using the same number of bootstrap samples as they have posterior samples of transition probabilities), labeling those bootstraps with an iteration number `iter` and joining them to the `trans_df` tibble by `iter` and `origin`. 
+
+We have included some code to help summarize those posteriors below, but the user could summarize the posterior samples however they wish.
+
+```{r}
+escp_summ = trans_df %>%
+    left_join(tot_escp,
+              by = "origin") %>%
+    mutate(escp = tot_escp * value) %>%
+    group_by(location = param,
+             origin) %>%
+    summarise(mean = mean(escp),
+              median = median(escp),
+              mode = estMode(escp),
+              sd = sd(escp),
+              skew = moments::skewness(escp),
+              kurtosis = moments::kurtosis(escp),
+              lowerCI = coda::HPDinterval(coda::as.mcmc(escp))[,1],
+              upperCI = coda::HPDinterval(coda::as.mcmc(escp))[,2],
+              .groups = "drop") %>%
+    mutate(across(c(mean, median, mode, sd, matches('CI$')),
+                  ~ if_else(. < 0, 0, .))) %>%
+    mutate(across(c(mean, median, mode, sd, skew, kurtosis, matches('CI$')),
+                  round,
+                  digits = 2)) %>%
+    arrange(desc(origin), location)
+```
+
+```{r, echo = F}
+escp_summ %>%
+  filter(origin == 1) %>%
+  kable(caption = "Proportion of tags moving past each location. Filtered to only show wild estimates.",
+        linesep = '',
+        booktabs = T) %>%
+  kable_styling()
+```
+
+# Updating a DABOM Model
+
+As new detection sites are installed, the current DABOM models may need to change. The user can modify the configuration file and parent-child table through R, or manually in other software like Excel and then read those files back into R. Many of the functions in the `DABOM` package will work correctly with these updated files, including `writeDABOM`, `fishNoFishNodes`, `setInitialValues`, `createJAGSinputs` and `setSavedParams`. The user can run the JAGS model, and even pull out summaries of the detection probabilities using `summariseDetectProbs`. 
+
+***However***, to generate estimates of escapement, the user will need to modify the appropriate `compileTransProbs_XXX` function to ensure that transition probabilities at the new sites are multiplied appropriately. 
+
+```{r, echo = F}
+unlink(basic_mod_file)
+unlink(final_mod_file)
+```
+
+# References
