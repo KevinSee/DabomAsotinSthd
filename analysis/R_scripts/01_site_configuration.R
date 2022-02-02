@@ -22,9 +22,6 @@
 # remotes::install_github("BiomarkABS/PITcleanr")
 # remotes::install_github("BiomarkABS/DABOM")
 
-# for the Asotin, you'll need the development branch of DABOM
-# remotes::install_github("BiomarkABS/DABOM@develop")
-
 #-----------------------------------------------------------------
 # load needed libraries
 library(PITcleanr)
