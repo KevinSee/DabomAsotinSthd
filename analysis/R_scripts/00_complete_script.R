@@ -113,7 +113,7 @@ prepped_ch = PITcleanr::prepWrapper(ptagis_file = ptagis_obs,
 
 # filter out detections we can't keep
 # in this example, we're using PITcleanr's default auto_keep_obs
-filter_ch = prepped_ch %>%
+filter_obs = prepped_ch %>%
   mutate(user_keep_obs = if_else(is.na(user_keep_obs),
                                  auto_keep_obs,
                                  user_keep_obs)) %>%
@@ -143,7 +143,7 @@ final_mod_file = here('analysis/model_files',
 # writes species and year specific jags code
 fixNoFishNodes(init_file = basic_mod_file,
                file_name = final_mod_file,
-               filter_ch = filter_ch,
+               filter_ch = filter_obs,
                parent_child = parent_child,
                configuration = configuration,
                fish_origin = fish_origin)
@@ -161,12 +161,12 @@ jags_data = createJAGSinputs(filter_ch = filter_obs,
                              fish_origin = fish_origin)
 
 # Tell JAGS which parameters in the model that it should save.
-jags_params = setSavedParams(model_file = mod_path,
+jags_params = setSavedParams(model_file = final_mod_file,
                              time_varying = F)
 
 
 # run the model
-jags = jags.model(mod_path,
+jags = jags.model(final_mod_file,
                   data = jags_data,
                   inits = init_fnc,
                   # n.chains = 1,
@@ -186,8 +186,8 @@ dabom_mod = coda.samples(jags,
 # summarize the results
 
 # summarize detection probability estimates
-detect_summ = summariseDetectProbs(dabom_mod = dabom_samp,
-                                   filter_ch = filter_ch,
+detect_summ = summariseDetectProbs(dabom_mod = dabom_mod,
+                                   filter_ch = filter_obs,
                                    cred_int_prob = 0.95)
 
 # compile all movement probabilities, and multiply them appropriately
@@ -241,4 +241,3 @@ escape_summ = escape_post %>%
 
 escape_summ %>%
   filter(origin == "W")
-
