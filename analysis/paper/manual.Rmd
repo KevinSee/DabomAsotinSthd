@@ -1,24 +1,34 @@
 ---
-title: "PITcleanr & DABOM User Manual for Upper Columbia Steelhead"
+title: "PITcleanr & DABOM User Manual for Asotin Steelhead"
 author:
-  - Kevin See:
-      email: Kevin.See@merck.com
-      institute: [biomark]
+- Kevin See:
+      email: Kevin.See@dfw.wa.gov
+      institute: [wdfw]
       correspondence: true
-  - Mike Ackerman:
-      email: Mike.Ackerman@merck.com
-      institute: [biomark]
 institute:
-  - biomark: Biomark, Inc. 705 South 8th St., Boise, Idaho, 83702, USA
+  - wdfw: Washington Department of Fish & Wildlife
 date: "`r format(Sys.time(), '%d %B, %Y')`"
 output: 
+    wdfwTemplates::wdfw_html_format2:
+      fig_caption: yes
+      fig_height: 5
+      fig_width: 6
+      toc: yes
+      toc_depth: 3
+      toc_float:
+        collapsed: yes
+        smooth_scroll: yes
+      pandoc_args:
+      - --lua-filter=../templates/scholarly-metadata.lua
+      - --lua-filter=../templates/author-info-blocks.lua
+      - --lua-filter=../templates/pagebreak.lua
     bookdown::pdf_document2:
       fig_caption: yes
       fig_height: 5
       fig_width: 6
       toc: yes
       includes:
-        in_header: ../templates/header_ABS.tex
+        in_header: ../templates/header_WDFW.tex
       pandoc_args:
       - --lua-filter=../templates/scholarly-metadata.lua
       - --lua-filter=../templates/author-info-blocks2.lua
@@ -51,9 +61,9 @@ bibliography:
 - ../paper/references.bib
 csl: "../templates/american-fisheries-society.csl" # Insert path for the bib-style
 abstract: |
-  This manual contains instructions on how to run the DABOM model to estimate adult abundace for steelhead to locations in the Upper Columbia River basin. We start by describing how to generate a list of valid PIT tags at Priest Rapids Dam to be used in the model and then how to query for detections of those PIT tags using PTAGIS. We then "clean up" the detections using the R package PITcleanr. Finally we describe how to write the JAGS model for use in DABOM, and finally, run DABOM to estimate transition probabilities for steelhead throughout the Upper Columbia system. DABOM movement probabilities can then be multiplied by estimates of escapement at Priest Rapids Dam to get abundance to locations or tributaries.
+  This manual contains instructions on how to run the DABOM model to estimate adult abundace for steelhead to locations in the Asotin River basin. We start by describing how to query for detections of a selected list of PIT tags using PTAGIS. We then "clean up" the detections using the R package PITcleanr. Finally we describe how to write the JAGS model for use in DABOM, and finally, run DABOM to estimate transition probabilities for steelhead throughout the Asotin system. DABOM movement probabilities can then be multiplied by estimates of escapement at the Asotin weir to get abundance to locations or tributaries.
 keywords: |
-  PITcleanr; DABOM; steelhead; Upper Columbia; Wenatchee; Entiat; Methow; Okanogan; Priest Rapids; abundance
+  PITcleanr; DABOM; steelhead; Asotin; abundance
 highlights: |
   These are the highlights.
 ---
@@ -74,7 +84,7 @@ library(kableExtra)
 
 # Introduction
 
-This manual describes how to run the **D**am **A**dult **B**ranch **O**ccupancy **M**odel ([DABOM](https://github.com/KevinSee/DABOM)) for steelhead crossing over Priest Rapids Dam and into the Upper Columbia River. We start by describing how to query [PTAGIS](https://www.ptagis.org/) to get all detections of adults at relevant observation sites (e.g., weirs, PIT tag arrays, etc.) for a particular spawning run from a list of "valid" PIT tags. Observation data are then "cleaned up" using the `PITcleanr` R package to determine a final destination or spawning location for each individual and detection data are prepared for use in the `DABOM` R package and model. Next, we describe how to write a JAGS model for use in `DABOM`, and finally, run `DABOM` to estimate detection and movement probabilities in the Upper Columbia River system. Movement probabilities can then be multiplied by an estimate of adult escapement at Priest Rapids Dam to estimate escapement, with uncertainty, at any observation site (or tributary) within the Upper Columbia River. 
+This manual describes how to run the **D**am **A**dult **B**ranch **O**ccupancy **M**odel ([DABOM](https://github.com/KevinSee/DABOM)) for steelhead crossing over Asotin River weir and into the Upper Columbia River. We start by describing how to query [PTAGIS](https://www.ptagis.org/) to get all detections of adults at relevant observation sites (e.g., weirs, PIT tag arrays, etc.) for a particular spawning run from a list of "valid" PIT tags. Observation data are then "cleaned up" using the `PITcleanr` R package to determine a final destination or spawning location for each individual and detection data are prepared for use in the `DABOM` R package and model. Next, we describe how to write a JAGS model for use in `DABOM`, and finally, run `DABOM` to estimate detection and movement probabilities in the Upper Columbia River system. Movement probabilities can then be multiplied by an estimate of adult escapement at Asotin River weir to estimate escapement, with uncertainty, at any observation site (or tributary) within the Upper Columbia River. 
 
 # Set-up
 
@@ -88,12 +98,12 @@ Next, you will also need the [JAGS](http://mcmc-jags.sourceforge.net/) software 
 
 ## R Packages
 
-After installing R and Studio, you will also need to install `tidyverse`, a series of R packages that work together for data science (i.e. data cleaning and manipulation), as well as the `jagsUI` package to interface with JAGS. To save some results to Excel files, we use the `WriteXLS` pacakge. The `tidyverse`, `jagsUI` and `WriteXLS` packages are all available from the R community and can be installed by typing the following into your R console:
+After installing R and Studio, you will also need to install `tidyverse`, a series of R packages that work together for data science (i.e. data cleaning and manipulation), as well as the `rjags` package to interface with JAGS. To save some results to Excel files, we use the `writexl` pacakge. The `tidyverse`, `rjags` and `writexl` packages are all available from the R community and can be installed by typing the following into your R console:
 
 ```{r install-cran, eval = F}
-install.packages("tidyverse")
-install.packages("jagsUI")
-install.packages('WriteXLS')
+install.packages(c("tidyverse",
+                   "rjags",
+                   "writexl"))
 ```
 
 Next, install `PITcleanr` and `DABOM` from Kevin See's [GitHub](https://github.com/) page [here](https://github.com/KevinSee). `PITcleanr` was written primarily to build a "river network" describing the relationships among detection sites in a system, to clean PIT tag detection data to establish capture histories for individuals, and to determine the final destination or spawning location for each fish. `DABOM` is used for writing and running the `DABOM` model and estimating detection and movement probabilities. You can use `devtools` to install both of these packages from [GitHub](https://github.com/) using the following: 
@@ -134,7 +144,7 @@ Briefly, the steps to process the data for a given run or spawn year include:
 1. Review PITcleanr output to determine final capture histories
 1. Run DABOM to estimate detection and movement probabilities
 1. Summarise DABOM results
-1. Combine DABOM movement probabilities with an estimate of adult escapement at Priest Rapids
+1. Combine DABOM movement probabilities with an estimate of adult escapement at Asotin weir
 
 Following, we describe each of the steps in detail using the 2018/2019 steelhead run as an example.
 
@@ -142,7 +152,7 @@ Following, we describe each of the steps in detail using the 2018/2019 steelhead
 
 ## Tag Information
 
-You will need to compile a list of PIT tags in steelhead that were caught in the Priest Rapids trap for a given run or spawn year, called the valid tag list. Tagged steelhead need to be a random, representative sample of the run, and so should only include tags from the trap. If a fish is caught in the trap and happens to be previously tagged, that tag can be used as part of the valid tag list. However, if a previously tagged fish (e.g. a fish tagged as a juvenile in the upper Methow) is detected crossing Priest Rapids, but is not caught in the trap, it cannot be used for this analysis.
+You will need to compile a list of PIT tags in steelhead that were caught in the Asotin weir for a given run or spawn year, called the valid tag list. Tagged steelhead need to be a random, representative sample of the run, and so should only include tags from the weir. If a fish is caught in the weir and happens to be previously tagged, that tag can be used as part of the valid tag list. However, if a previously tagged fish (e.g. a fish tagged as a juvenile in the Asotin) is detected upstream somewhere in the Asotin, but is not caught in the weir, it cannot be used for this analysis.
 
 Save this list of valid PIT tag codes as a text file with no headers, to make it easy to upload to a PTAGIS query.
 
@@ -154,9 +164,11 @@ library(lubridate) # for dealing with dates, is installed with tidyverse
 library(readxl)
 
 # which spawn year are we dealing with?
-yr = 2019
+yr = 2021
+```
 
-# read in biological data from trap
+```{r, eval = F}
+# read in biological data from weir
 bio_df = read_excel('../data/raw_data/WDFW/BY19 BioData.xlsx',
                        1) %>%
   mutate(BroodYear = "BY19") %>%
@@ -186,7 +198,7 @@ bio_df %>%
   filter(!is.na(TagID)) %>%
   select(TagID) %>%
   distinct() %>%
-  write_delim(path = paste0('examp_data/UC_Sthd_Tags_', yr, '.txt'),
+  write_delim(path = paste0('examp_data/Asotin_Sthd_Tags_', yr, '.txt'),
               delim = '\n',
               col_names = F)
 ```
@@ -235,243 +247,57 @@ library(tidyverse)
 
 ### Build Site Configuration
 
-The first necessary step to "cleaning up" or processing the detections is to define which sites we are going to include in the DABOM model. The `PITcleanr` package contains a function, specific to Priest Rapids Dam and the Upper Columbia, to do this, called `writePRDNodeNetwork()`. This function lists all the various sites by their PTAGIS site ID, and shows which other sites a tag would need to pass in order to reach that particular site. The below saves a new object `site_df` contaning that information. If desired, you can use the `view()` function to review `site_df` in a new RStudio window. 
-
-```{r}
-site_df = writePRDNodeNetwork()
-site_df
-# view(site_df)
-```
-
-The next step is to query PTAGIS for all the metadata associated with these sites. Again, `PITcleanr` includes a function to do this, `buildConfig()`, but you will need an internet connection to run this. The `buildConfig()` function returns information about each site in PTAGIS, including the site code, the various configuration codes, the antenna IDs, when that configuration started and ended (if it has), what type of site it is (interrogation, INT, or mark/recapture/recover, MRR), the site name, the antenna group each antenna is part of, and several other pieces of information. It also assigns a 'model node' to each antenna. The model nodes essentially define which array each antenna is part of within each site. If it is a single array (or perhaps an MRR site), all of the antennas will be assigned to the same model node. If there is a double array, the antennas in the downstream array will be assigned to the "B0" array, and the upstream antennas to the "A0" array. If there is a triple array, by default the middle array is grouped with the upper array, to help simplify the DABOM model structure. Defining upstream and downstream arrays and nodes are a necessary step to estimate detection probabilities at double (or triple) arrays. This file is what will link the PTAGIS detections to the DABOM model nodes.
+The first necessary step to "cleaning up" or processing the detections is to define which sites we are going to include in the DABOM model. We will select these to be specific to the Asotin. The next step is to query PTAGIS for all the metadata associated with these sites. Again, `PITcleanr` includes a function to do this, `buildConfig()`, but you will need an internet connection to run this. The `buildConfig()` function returns information about each site in PTAGIS, including the site code, the various configuration codes, the antenna IDs, when that configuration started and ended (if it has), what type of site it is (interrogation, INT, or mark/recapture/recover, MRR), the site name, the antenna group each antenna is part of, and several other pieces of information. It also assigns a 'model node' to each antenna. The model nodes essentially define which array each antenna is part of within each site. If it is a single array (or perhaps an MRR site), all of the antennas will be assigned to the same model node. If there is a double array, the antennas in the downstream array will be assigned to the "B0" array, and the upstream antennas to the "A0" array. If there is a triple array, by default the middle array is grouped with the upper array, to help simplify the DABOM model structure. Defining upstream and downstream arrays and nodes are a necessary step to estimate detection probabilities at double (or triple) arrays. This file is what will link the PTAGIS detections to the DABOM model nodes.
 
 ```{r}
 org_config = buildConfig()
 
-# manually add site for Colockum Creek (not in PTAGIS)
-org_config = org_config %>%
-  bind_rows(tibble(SiteID = 'CLK',
-                   ConfigID = 100,
-                   AntennaID = 'A1',
-                   Node = 'CLK',
-                   ValidNode = T,
-                   # making these up
-                   StartDate = as.POSIXct(ymd('20100101')),
-                   SiteType = 'INT',
-                   SiteName = 'Colockum Creek',
-                   AntennaGroup = 'Single Colockum Ck',
-                   SiteDescription = 'Tempoary single antenna.',
-                   SiteTypeName = 'Instream Remote Detection System',
-                   RKM = '740.001',
-                   RKMTotal = 741))
 ```
 
-Note, the `org_config` object contains **every** INT and MRR detection site included in PTAGIS. Note that in the code above we added information about a site that was not registered in PTAGIS. You now have the opportunity to modify this configuration file however you would like, re-assigning various antennas or sites to different nodes. For this version of DABOM, we have some suggestions, such as combing some of the carcass recovery sites with upstream arrays, or grouping all of the sites at the Leavenworth National Fish Hatchery into a single node, called "LNF". Many of the modifications below help simplify the nodes throughout the network.
+Note, the `org_config` object contains **every** INT and MRR detection site included in PTAGIS. Note that in the code above we added information about a site that was not registered in PTAGIS. You now have the opportunity to modify this configuration file however you would like, re-assigning various antennas or sites to different nodes. 
 
 ```{r}
+# customize some nodes based on DABOM framework
 configuration = org_config %>%
-  filter(!(SiteID == 'WAN' & SiteType == 'MRR'),
-         !(SiteID == 'TMF' & SiteType == 'MRR'),
-         !(SiteID == 'PRO' & SiteType == 'MRR')) %>%
-  mutate(Node = ifelse(SiteID %in% c('RIA', 'RRF', 'WEA', 'PRV'),
-                       SiteID,
-                       Node)) %>%
-  mutate(Node = ifelse(SiteID == 'PRDLD1',
-                       'PRA',
-                       Node)) %>%
-  mutate(Node = ifelse(Node == "LWE",
-                       'LWEB0',
-                       Node),
-         Node = ifelse(SiteID %in% c('TUF', 'TUMFBY', 'TUM'),
-                       'TUM',
-                       Node),
-         Node = ifelse(SiteID == 'LNF' & AntennaID %in% c('01', '02'),
-                       'LNFA0',
-                       Node),
-         Node = ifelse(SiteID == 'LNF' & AntennaID %in% c('03', '04'),
-                       'LNFB0',
-                       Node),
-         Node = ifelse(SiteID == 'LEAV',
-                       'LNFA0',
-                       Node),
-         Node = ifelse(SiteID == 'ICL' & ConfigID == 100,
-                       'ICLB0',
-                       Node),
-         Node = ifelse(SiteID == 'CHIWAC',
-                       'CHWA0',
-                       Node),
-         Node = ifelse(SiteID == 'CHIWAR',
-                       'CHLA0',
-                       Node),
-         Node = ifelse(SiteID == 'CHIKAC',
-                       'CHUA0',
-                       Node),
-         Node = ifelse(SiteID == 'WHITER',
-                       'WTLA0',
-                       Node),
-         Node = ifelse(SiteID == 'LWENAT',
-                       'LWNA0',
-                       Node),
-         Node = ifelse(SiteID == 'NASONC',
-                       'NALA0',
-                       Node),
-         # any fish seen at Dryden dam should also be seen at LWE
-         Node = ifelse(SiteID == 'DRY',
-                       'LWEA0',
-                       Node),
-         # any fish seen at Chiwawa acclimation pond gets moved to CHL
-         Node = ifelse(SiteID == 'CHP',
-                       'CHLA0',
-                       Node),
-         Node = ifelse(SiteID == 'EBO',
-                       'RRF',
-                       Node),
-         Node = ifelse(SiteID == 'EHL' & ConfigID == 100 & AntennaID == '02',
-                       'EHLB0',
-                       Node),
-         Node = ifelse(SiteID == 'EHL' & ConfigID == 100 & AntennaID == '01',
-                       'EHLA0',
-                       Node),
-         Node = ifelse(SiteID == 'EHL' & ConfigID == 110 & AntennaID == '03',
-                       'EHLB0',
-                       Node),
-         Node = ifelse(SiteID == 'EHL' & ConfigID == 110 & AntennaID %in% c('01', '02'),
-                       'EHLA0',
-                       Node),
-         Node = ifelse(SiteID == 'WEA' & AntennaID == 'C1',
-                       'WVTB0',
-                       Node),
-         Node = ifelse(SiteID == 'WEA' & AntennaID == 'C2',
-                       'WVTA0',
-                       Node),
-         Node = ifelse(Node == "LMR",
-                       'LMRB0',
-                       Node),
-         Node = ifelse(SiteID == 'LBC' & ConfigID == 100,
-                       'LBCB0',
-                       Node),
-         Node = ifelse(SiteID == 'MRC',
-                       'MRCB0',
-                       Node),
-         Node = ifelse(SiteID %in% c('SSC', '18N', 'MHB', 'M3R', 'MWF'),
-                       'MRCA0',
-                       Node),
-         Node = ifelse(SiteID == 'MSH' & AntennaID %in% c('02', '03'),
-                       'MSHB0',
-                       Node),
-         Node = ifelse(SiteID == 'MSH' & AntennaID %in% c('01'),
-                       'MSHA0',
-                       Node),
-         Node = ifelse(SiteID == 'MSH' & AntennaID == '00',
-                       'METHB0',
-                       Node),
-         Node = ifelse(SiteID == 'METH',
-                       'METHA0',
-                       Node),
-         Node = ifelse(SiteID == 'LLC' & ConfigID == 100,
-                       ifelse(AntennaID == 'D3',
-                              'LLCB0',
-                              'LLCA0'),
-                       Node),
-         Node = ifelse(Node == "SCP",
-                       'SCPB0',
-                       Node),
-         Node = ifelse(Node == "OMK",
-                       'OMKB0',
-                       Node),
-         Node = ifelse(SiteID %in% c('OFB', 'OMF'),
-                       'OMKA0',
-                       Node),
-         Node = ifelse(SiteID == 'ZSL',
-                       ifelse(grepl('Weir 3', AntennaGroup, ignore.case = T),
-                              'ZSLB0',
-                              'ZSLA0'),
-                       Node),
-         Node = ifelse(SiteID == 'SA1' & ConfigID == 110,
-                       'SA1B0',
-                       Node),
-         Node = ifelse(SiteID == 'OKC' & ConfigID == 100,
-                       'OKCB0',
-                       Node),
-         Node = ifelse(SiteID == 'RCT' & ConfigID == 100,
-                       'RCTB0',
-                       Node),
-         Node = ifelse(SiteID == 'BPC' & ConfigID == 100,
-                       ifelse(AntennaID %in% c('C3'),
-                              'BPCB0',
-                              'BPCA0'),
-                       Node),
-         Node = ifelse(SiteID == 'PRH' & AntennaID %in% c('F1', 'F2', 'F3', 'F4'),
-                       'PRHB0',
-                       Node),
-         Node = ifelse((SiteID == 'PRH' & AntennaID %in% c('F5', 'F6', '01', '02')) | SiteID %in% c('DDM', 'DM', 'UM', 'UUM', 'UP'),
-                       'PRHA0',
-                       Node),
-         Node = ifelse(SiteID == 'PRO' & SiteType == 'INT',
-                       'PROB0',
-                       Node),
-         Node = ifelse(SiteID %in% c('CHANDL', 'SAT', 'TOP', 'SUN', 'LNR', 'ROZ', 'LMC', 'TAN') | SiteID == 'PRO' & SiteType == 'MRR',
-                       'PROA0',
-                       Node),
-         Node = ifelse(SiteID == 'ICH',
-                       'ICHB0',
-                       Node),
-         Node = ifelse(grepl('522\\.', RKM) & RKMTotal > 538,
-                       'ICHA0',
-                       Node),
-         Node = ifelse(SiteID == 'MDR',
-                       'MDRB0',
-                       Node),
-         Node = ifelse(SiteID %in% c('LWD', 'BGM', 'NBA', 'MCD'),
-                       'MDRA0',
-                       Node),
-         Node = ifelse(SiteID == 'HST',
-                       'HSTB0',
-                       Node),
-         Node = ifelse(SiteID %in% c('BBT', 'COP', 'PAT'),
-                       'HSTA0',
-                       Node),
-         Node = ifelse(SiteID == 'JD1',
-                       'JD1B0',
-                       Node),
-         Node = ifelse(SiteID %in% c('30M', 'BR0', 'JDM', 'SJ1', 'SJ2', 'MJ1'),
-                       'JD1A0',
-                       Node),
-         Node = ifelse(SiteID != 'JD1' & as.integer(stringr::str_split(RKM, '\\.', simplify = T)[,1]) < 351,
-                       'BelowJD1',
-                       Node)) %>%
-  distinct()
-
-# correct a couple RKM values
-configuration = configuration %>%
-  mutate(RKM = ifelse(SiteID == 'SA1',
-                      '858.041.003',
-                      RKM),
-         RKMTotal = ifelse(SiteID == 'SA1',
-                           902,
-                           RKMTotal)) %>%
-  mutate(RKM = ifelse(SiteID == 'TON',
-                      '858.133.001',
-                      RKM),
-         RKMTotal = ifelse(SiteID == 'TON',
-                           992,
-                           RKMTotal)) %>%
-  mutate(RKM = ifelse(grepl('WVT', Node),
-                      '829.001',
-                      RKM),
-         RKMTotal = ifelse(grepl('WVT', Node),
-                           830,
-                           RKMTotal))
+  # focus on sites in the Asotin
+  filter(site_code %in% c("ACM",
+                          "ASOTIC",
+                          "GEORGC",
+                          "ACB",
+                          "AFC",
+                          "CCA")) %>%
+  mutate(node = if_else(site_code == "AFC",
+                        if_else(str_detect(antenna_group,
+                                           "Mainstem") |
+                                  str_detect(antenna_group,
+                                             "MAINSTEM"),
+                                "AFCB0",
+                                "AFCA0"),
+                        node)) %>%
+  # correct a couple rkm values
+  mutate(rkm = if_else(site_code == 'ASOTIC',
+                       '522.234.004',
+                       rkm),
+         rkm_total = if_else(site_code == 'ASOTIC',
+                             760,
+                             rkm_total)) %>%
+  mutate(latitude = if_else(site_code == "ASOTIC",
+                            unique(latitude[site_code == "ACM"]),
+                            latitude),
+         longitude = if_else(site_code == "ASOTIC",
+                            unique(longitude[site_code == "ACM"]),
+                            longitude)) %>%
+    filter(site_code != "ACM")
 ```
 
 ### Parent-Child Table
 
-The next step is to build a parent-child table that describes which nodes are upstream of which nodes. In most cases, when modeling returning adults, the parent node is the first node the adult crosses when returning upstream to spawn and the child node is the next node upstream. The exception being nodes that occur outside of the Upper Columbia (e.g., JD1, ICH) to account for adults that are tagged at Priest Rapids Dam, but then later detected outside of the Upper Columbia. The `PITcleanr` function `createParentChildDf()` does this, taking as inputs the data frame of sites in our model and the configuration file we just created. The other input is the starting date (in `YYYYMMDD` format) for this model run, because the function uses that to find the appropriate configuration of the antennas. For this version, we define that starting date as June 1 of the year prior to the spawn year we are interested in.
+The next step is to build a parent-child table that describes which nodes are upstream of which nodes. In most cases, when modeling returning adults, the parent node is the first node the adult crosses when returning upstream to spawn and the child node is the next node upstream. The exception being nodes that occur outside of the Asotin (e.g., JD1, ICH) to account for adults that are tagged at Asotin River weir, but then later detected outside of the Asotin basin. The `PITcleanr` function `createParentChildDf()` does this, taking as inputs the data frame of sites in our model and the configuration file we just created. The other input is the starting date (in `YYYYMMDD` format) for this model run, because the function uses that to find the appropriate configuration of the antennas. For this version, we define that starting date as July 1 of the year prior to the spawn year we are interested in.
 
 ```{r}
 # start date is June 1 of the previous year
 # the paste0 function simply pastes together our 'yr' and '0601' into the 'YYYYMMDD' format
-start_date = paste0(yr - 1, '0601')
+start_date = paste0(yr - 1, '0701')
 
 # build parent-child table
 parent_child = createParentChildDf(site_df,
@@ -489,7 +315,7 @@ First, use the `read_csv()` function to read in all of the detections we output 
 ```{r, eval = F}
 # get raw observations from PTAGIS
 # These come from running a saved query on the list of tags to be used
-observations = read_csv(paste0('../data/raw_data/PTAGIS/UC_Sthd_', yr, '_CTH.csv')) %>%
+observations = read_csv(paste0('../data/raw_data/PTAGIS/Asotin_Sthd_', yr, '_CTH.csv')) %>%
     filter(`Event Site Code Value` != "ORPHAN")
 
 # process those observations with PITcleanr, using Upper Columbia-specific function
@@ -507,24 +333,24 @@ proc_list = processCapHist_PRD(startDate = start_date,
 ```
 
 ```{r, echo = F}
-load(paste0("../data/derived_data/model_fits/PRA_Steelhead_", yr,'_DABOM.rda'))
+load(paste0("../data/derived_data/model_fits/Asotin_Sthd_", yr,'_DABOM.rda'))
 ```
 
 The output of the `processCapHist_PRD()` function (`proc_list` in our example) is a list, containing four elements:
 
 * *ValidPaths*: a data frame containing the path a fish would need to take to reach each detection node, including all the nodes it would need to pass along the way (regardless of whether it is detected at each). The *ValidPaths* can be accessed using `proc_list$ValidPaths` or `proc_list[[1]]`.
 
-* *NodeOrder*: a data frame containing each node in the model, the node order (how many nodes to cross to arrive there from Priest Rapids Dam), the "path" a tag would take to get there consisting of all the nodes it could be detected at along the way, which site that node is associated with, and the RKM of that site from PTAGIS metadata. The *NodeOrder* can easily be accessed using `proc_list$NodeOrder` or `proc_list[[2]]`.
+* *NodeOrder*: a data frame containing each node in the model, the node order (how many nodes to cross to arrive there from Asotin River weir), the "path" a tag would take to get there consisting of all the nodes it could be detected at along the way, which site that node is associated with, and the RKM of that site from PTAGIS metadata. The *NodeOrder* can easily be accessed using `proc_list$NodeOrder` or `proc_list[[2]]`.
 
 * *ValidObs*: a data frame containing all the observations to be deemed "valid". This consists of translating detections from site/antenna combinations into detections on nodes and then simplifing consecutive hits on the same node. The *ValidObs* can easily be accessed using `proc_list$ValidObs` or `proc_list[[3]]`.
 
-* *ProcCapHist*: The "cleaned" capture histories, with a row for each detection that has been kept. It shows the tag ID, the date that tag was in the trap, the first and last observed date and time on that node, the PTAGIS site ID associated with that node, whether the tag was moving upstream or downstream (based on the previous observation), and two columns containing **ProcStatus** for "processed status". **AutoProcStatus** is `PITcleanr`'s best guess as to whether the observation on that node should be kept (`TRUE`) or discarded (`FALSE`). **UserProcStatus** is where the end user can define that for themselves. The *ProcCapHist* can be accessed using `proc_list$ProcCapHist` or `proc_list[[4]]`.
+* *ProcCapHist*: The "cleaned" capture histories, with a row for each detection that has been kept. It shows the tag ID, the date that tag was in the weir, the first and last observed date and time on that node, the PTAGIS site ID associated with that node, whether the tag was moving upstream or downstream (based on the previous observation), and two columns containing **ProcStatus** for "processed status". **AutoProcStatus** is `PITcleanr`'s best guess as to whether the observation on that node should be kept (`TRUE`) or discarded (`FALSE`). **UserProcStatus** is where the end user can define that for themselves. The *ProcCapHist* can be accessed using `proc_list$ProcCapHist` or `proc_list[[4]]`.
 
-After this step, the results of *ProcCapHist* can be saved to a .txt, .csv, .xls, or .xlsx file, to be examined by a fisheries biologist. To save the results, simply change the `save_file` argument in `processCapHist_PRD()` to `T` or `TRUE` and add the `file_name` containing the file name (with possible extension) and optionally, the directory, to be saved to (e.g. *"output/PITcleanr/UC_Steelhead_2019.csv"*). NOTE: to save an .xls or .xlsx file may require installation of [Perl](https://www.perl.org/get.html) depending on your OS.
+After this step, the results of *ProcCapHist* can be saved to a .txt, .csv, .xls, or .xlsx file, to be examined by a fisheries biologist. To save the results, simply change the `save_file` argument in `processCapHist_PRD()` to `T` or `TRUE` and add the `file_name` containing the file name (with possible extension) and optionally, the directory, to be saved to (e.g. *"output/PITcleanr/Asotin_Sthd_2019.csv"*). NOTE: to save an .xls or .xlsx file may require installation of [Perl](https://www.perl.org/get.html) depending on your OS.
 
 ## Examine PITcleanr Output
 
-The *ProcCapHist* in `proc_list` now contains the cleaned, processed capture histories for each PIT tag with the **AutoProcStatus** column containing `PITcleanr`'s best guess of whether the observation should be used in the DABOM model and a **UserProcStatus** column allowing the end user to make their own determination of whether an observation should be used. For all tags with no issues (i.e. the detections move steadily upstream after Priest Rapids Dam), the **UserProcStatus** column has been set to `TRUE`. However, for any tags with potential detections in question, the **UserProcStatus** is (blank). In this case, the user merely needs to open the output, perhaps in Excel, and filter the **UserProcStatus** selecting all the rows with a (blank). Initally, that will include all the detections for the tags in question. By examing the dates and the nodes, and possibly considering the suggestions made in the **AutoProcStatus** column by `PITcleanr`, the user needs to fill in each blank with either `TRUE` or `FALSE` to show whether the detection at the node should be kept or ignored for the DABOM model, respectively.
+The *ProcCapHist* in `proc_list` now contains the cleaned, processed capture histories for each PIT tag with the **AutoProcStatus** column containing `PITcleanr`'s best guess of whether the observation should be used in the DABOM model and a **UserProcStatus** column allowing the end user to make their own determination of whether an observation should be used. For all tags with no issues (i.e. the detections move steadily upstream after Asotin River weir), the **UserProcStatus** column has been set to `TRUE`. However, for any tags with potential detections in question, the **UserProcStatus** is (blank). In this case, the user merely needs to open the output, perhaps in Excel, and filter the **UserProcStatus** selecting all the rows with a (blank). Initally, that will include all the detections for the tags in question. By examing the dates and the nodes, and possibly considering the suggestions made in the **AutoProcStatus** column by `PITcleanr`, the user needs to fill in each blank with either `TRUE` or `FALSE` to show whether the detection at the node should be kept or ignored for the DABOM model, respectively.
 
 One of the assumptions in the DABOM model is that fish are making a one-way upstream migration, which ends in their spawning location. So if a fish is detected moving past the TUM array, for example, and later seen moving past the ICL site, both of those observations cannot be kept in the model. Based on the observation dates (**ObsDate** and **lastObsDate**), the user will need to decide where the final spawning location was for that fish. If it was past TUM, then the rows where the **SiteID** is ICL should be marked `FALSE` in the "UserProcStatus" column, and the other one marked `TRUE`. Instead, if it appears the fish spawned in Icicle Creek, then the TUM rows should be marked `FALSE`. The default action taken by the **AutoProcStatus** column is to keep the latest observation, so it would default to keeping the ICL observations and dropping the TUM ones.
 
@@ -542,7 +368,7 @@ proc_list[[4]] %>%
 
 ### Summarise Information for Each Tag
 
-At this point, some summary information can be obtained for each tag in the valid tag list, including potential spawning (i.e. final) location. This is based on the furthest model node that the tag was detected at, after filtering out unwanted observations (see [Examine PITcleanr Output]). The `summariseTagData()` function also takes biological information obtained at the trap (e.g. the `bio_df` object created above), and the output can be used to summarise, for example, sex ratios, age or length distributions, etc. for various nodes in the network.
+At this point, some summary information can be obtained for each tag in the valid tag list, including potential spawning (i.e. final) location. This is based on the furthest model node that the tag was detected at, after filtering out unwanted observations (see [Examine PITcleanr Output]). The `summariseTagData()` function also takes biological information obtained at the weir (e.g. the `bio_df` object created above), and the output can be used to summarise, for example, sex ratios, age or length distributions, etc. for various nodes in the network.
 
 ```{r}
 tag_summ = proc_list$ProcCapHist %>%
@@ -614,14 +440,15 @@ We have compiled all of the necessary inputs for DABOM. Next, we need to generat
 
 ## DABOM JAGS Model
 
-To run the DABOM model, we need to write the text file with the Priest Rapids DABOM model that the JAGS software will use. The `DABOM` R package contains a function `writeDABOM_PRA` to write a generic version for the Priest Rapids Dam version of DABOM:
+To run the DABOM model, we need to write the text file with the Asotin DABOM model that the JAGS software will use. The `DABOM` R package contains a function `writeDABOM` to write a generic version for the Asotin River weir version of DABOM:
 
-```{r}
+```{r, eval = F}
 # file path to the default and initial model
-basic_modNm = 'examp_data/PRD_DABOM.txt'
+basic_modNm = here('analysis/model_files',
+                   "Asotin_DABOM.txt")
 
-# write the Priest Rapids Dam DABOM model for JAGS
-writeDABOM_PRA(file_name = basic_modNm)
+# write the DABOM model for JAGS
+writeDABOM(file_name = basic_modNm)
 
 ```
 
@@ -629,7 +456,8 @@ We then need to update that "default" DABOM model based on our tag detections. F
 
 ```{r}
 # filepath for specific JAGS model code for species and year
-mod_path = paste0('examp_data/PRA_Steelhead_', yr, '.txt')
+mod_path = here('analysis/model_files',
+                paste0('Asotin_DABOM_', yr, '.txt'))
 
 # writes species and year specific jags code
 fixNoFishNodes(basic_modNm,
@@ -689,7 +517,7 @@ What is returned (from the `jags.basic` function) is an `mcmc.list` object. The 
 
 ## Summarise DABOM results
 
-Now that we have completed our DABOM run, we can summarise a number of results from the `dabom_mod` `mcmc.list` object we created above including detection and movement (i.e. transition) probabilties. In addition, transition probabilities can be multiplied by some estimate of escapement in the system (e.g. Priest Rapids Dam) to get abundance to any node or group of nodes (e.g. a tributary). 
+Now that we have completed our DABOM run, we can summarise a number of results from the `dabom_mod` `mcmc.list` object we created above including detection and movement (i.e. transition) probabilties. In addition, transition probabilities can be multiplied by some estimate of escapement in the system (e.g. Asotin weir) to get abundance to any node or group of nodes (e.g. a tributary). 
 
 ### Detection Probabilities
 
@@ -716,11 +544,11 @@ detect_summ %>%
 
 ### Transition Probabilities
 
-The movement or transition probabilities have to be extracted, and then multiplied appropriately, so that the movement past a site far upstream in the network also accounts for moving past all of the downstream sites before that one. There is a function specific to the Priest Rapids Dam version of DABOM `compileTransProbs_PRA` to do this for you. The **param** column in the `trans_summ` summary table below refers to the probability of a tag moving *past* that site, or if the parameter ends in "_bb", the probability of falling into the black box above that site.
+The movement or transition probabilities have to be extracted, and then multiplied appropriately, so that the movement past a site far upstream in the network also accounts for moving past all of the downstream sites before that one. There is a function specific to the Asotin weir version of DABOM `compileTransProbs_ASOTIC` to do this for you. The **param** column in the `trans_summ` summary table below refers to the probability of a tag moving *past* that site, or if the parameter ends in "_bb", the probability of falling into the black box above that site.
 
 ```{r}
 # compile all movement probabilities, and multiply them appropriately
-trans_df = compileTransProbs_PRA(dabom_mod)
+trans_df = compileTransProbs_ASOTIC(dabom_mod)
 ```
 
 ```{r}
@@ -752,7 +580,7 @@ trans_summ %>%
 devtools::install_github("KevinSee/STADEM")
 ```
 
-Finally, we want to generate estimates of abundance for nodes or groups of nodes (e.g. tributaries or populations). To accomplish this, the next step is to multiply the transition probabilities from `DABOM` by the total escapement at Priest Rapids Dam. There is an additional R package, `STADEM` (*St*ate-space *A*dult *D*am *E*scapement *M*odel) that contains a function `getWindowCounts()` to query the window counts at a variety of dams within the Columbia River Basin, including Priest Rapids Dam, on a daily time-step. Those daily counts can be summed up for the season:
+Finally, we want to generate estimates of abundance for nodes or groups of nodes (e.g. tributaries or populations). To accomplish this, the next step is to multiply the transition probabilities from `DABOM` by the total escapement at Asotin weir. There is an additional R package, `STADEM` (*St*ate-space *A*dult *D*am *E*scapement *M*odel) that contains a function `getWindowCounts()` to query the window counts at a variety of dams within the Columbia River Basin, including Asotin weir, on a daily time-step. Those daily counts can be summed up for the season:
 
 ```{r}
 # load STADEM
@@ -956,7 +784,7 @@ save_list = list('Population Escapement' = pop_summ %>%
                              digits = 3))
 
 WriteXLS(x = save_list,
-         ExcelFileName = paste0('examp_data/PRA_est_', spp, '_', yr, '_', format(Sys.Date(), '%Y%m%d'), '.xlsx'),
+         ExcelFileName = paste0('examp_data/Asotin_est_', spp, '_', yr, '_', format(Sys.Date(), '%Y%m%d'), '.xlsx'),
          AdjWidth = T,
          AutoFilter = F,
          BoldHeaderRow = T,
